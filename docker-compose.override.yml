@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  percona-postgresql:
+    volumes:
+      - ./entrypoint.sh:/entrypoint.sh:ro
+      - ./tls:/var/snap/percona-postgresql/current/tls:ro
+    environment:
+      - DEBUG=true
+      - ENABLE_TLS=false
+    command: ["standalone"]
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@percona.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    ports:
+      - "8080:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - percona-net
+    restart: unless-stopped
+    depends_on:
+      - percona-postgresql
+
+volumes:
+  pgadmin_data:
+    driver: local

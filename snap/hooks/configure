@@ -1,0 +1,112 @@
+#!/bin/bash
+
+# Get configuration values from snap options
+POSTGRES_PASSWORD=$(snapctl get postgres-password)
+PATRONI_CLUSTER_NAME=$(snapctl get patroni-cluster-name)
+PATRONI_NODE_NAME=$(snapctl get patroni-node-name)
+ENABLE_TLS=$(snapctl get enable-tls)
+ETCD_HOSTS=$(snapctl get etcd-hosts)
+
+# Set defaults if not provided
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-"postgres"}
+PATRONI_CLUSTER_NAME=${PATRONI_CLUSTER_NAME:-"percona-cluster"}
+PATRONI_NODE_NAME=${PATRONI_NODE_NAME:-"$(hostname)"}
+ENABLE_TLS=${ENABLE_TLS:-"false"}
+ETCD_HOSTS=${ETCD_HOSTS:-"127.0.0.1:2379"}
+
+echo "Configuring Percona PostgreSQL..."
+
+# Update PostgreSQL configuration
+POSTGRES_CONF="$SNAP_DATA/postgresql/postgresql.conf"
+if [ -f "$POSTGRES_CONF" ]; then
+    # Basic PostgreSQL configuration
+    sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" $POSTGRES_CONF
+    sed -i "s/#port = 5432/port = 5432/" $POSTGRES_CONF
+    sed -i "s/#wal_level = replica/wal_level = replica/" $POSTGRES_CONF
+    sed -i "s/#max_wal_senders = 10/max_wal_senders = 10/" $POSTGRES_CONF
+    sed -i "s/#max_replication_slots = 10/max_replication_slots = 10/" $POSTGRES_CONF
+    sed -i "s/#hot_standby = on/hot_standby = on/" $POSTGRES_CONF
+    
+    # Enable TLS if requested
+    if [ "$ENABLE_TLS" = "true" ]; then
+        echo "ssl = on" >> $POSTGRES_CONF
+        echo "ssl_cert_file = '$SNAP_DATA/tls/server.crt'" >> $POSTGRES_CONF
+        echo "ssl_key_file = '$SNAP_DATA/tls/server.key'" >> $POSTGRES_CONF
+        echo "ssl_ca_file = '$SNAP_DATA/tls/ca.crt'" >> $POSTGRES_CONF
+    fi
+fi
+
+# Update pg_hba.conf
+PG_HBA_CONF="$SNAP_DATA/postgresql/pg_hba.conf"
+if [ -f "$PG_HBA_CONF" ]; then
+    # Add replication and remote access rules
+    echo "" >> $PG_HBA_CONF
+    echo "# Replication connections" >> $PG_HBA_CONF
+    echo "host replication all 0.0.0.0/0 md5" >> $PG_HBA_CONF
+    echo "host all all 0.0.0.0/0 md5" >> $PG_HBA_CONF
+    
+    if [ "$ENABLE_TLS" = "true" ]; then
+        echo "hostssl all all 0.0.0.0/0 md5" >> $PG_HBA_CONF
+        echo "hostssl replication all 0.0.0.0/0 md5" >> $PG_HBA_CONF
+    fi
+fi
+
+# Update Patroni configuration
+PATRONI_CONF="$SNAP_DATA/patroni.yml"
+if [ -f "$PATRONI_CONF" ]; then
+    # Replace placeholders in patroni.yml
+    sed -i "s/CLUSTER_NAME/$PATRONI_CLUSTER_NAME/g" $PATRONI_CONF
+    sed -i "s/NODE_NAME/$PATRONI_NODE_NAME/g" $PATRONI_CONF
+    sed -i "s/ETCD_HOSTS/$ETCD_HOSTS/g" $PATRONI_CONF
+    sed -i "s|DATA_DIR|$SNAP_DATA/postgresql|g" $PATRONI_CONF
+    sed -i "s|BIN_DIR|$SNAP/bin|g" $PATRONI_CONF
+    
+    # Add TLS configuration if enabled
+    if [ "$ENABLE_TLS" = "true" ]; then
+        cat >> $PATRONI_CONF << EOF
+
+  parameters:
+    ssl: on
+    ssl_cert_file: $SNAP_DATA/tls/server.crt
+    ssl_key_file: $SNAP_DATA/tls/server.key
+    ssl_ca_file: $SNAP_DATA/tls/ca.crt
+EOF
+    fi
+fi
+
+# Update HAProxy configuration
+HAPROXY_CONF="$SNAP_DATA/haproxy.cfg"
+if [ -f "$HAPROXY_CONF" ]; then
+    if [ "$ENABLE_TLS" = "true" ]; then
+        sed -i "s|#ssl|ssl|g" $HAPROXY_CONF
+        sed -i "s|TLS_CERT_PATH|$SNAP_DATA/tls/server.crt|g" $HAPROXY_CONF
+    fi
+fi
+
+# Update PgBouncer configuration
+PGBOUNCER_CONF="$SNAP_DATA/pgbouncer.ini"
+if [ -f "$PGBOUNCER_CONF" ]; then
+    sed -i "s|AUTH_FILE_PATH|$SNAP_DATA/userlist.txt|g" $PGBOUNCER_CONF
+    sed -i "s|LOGFILE_PATH|$SNAP_DATA/logs/pgbouncer.log|g" $PGBOUNCER_CONF
+    sed -i "s|PIDFILE_PATH|$SNAP_DATA/pgbouncer.pid|g" $PGBOUNCER_CONF
+fi
+
+# Restart services if they're running
+if snapctl services percona-postgresql.postgresql | grep -q "active"; then
+    snapctl restart percona-postgresql.postgresql
+fi
+
+if snapctl services percona-postgresql.patroni | grep -q "active"; then
+    snapctl restart percona-postgresql.patroni
+fi
+
+if snapctl services percona-postgresql.haproxy | grep -q "active"; then
+    snapctl restart percona-postgresql.haproxy
+fi
+
+if snapctl services percona-postgresql.pgbouncer | grep -q "active"; then
+    snapctl restart percona-postgresql.pgbouncer
+fi
+
+echo "Configuration updated successfully!"
+echo "Use 'snap get percona-postgresql' to view current configuration."

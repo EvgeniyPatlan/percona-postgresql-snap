@@ -1,0 +1,3 @@
+"postgres" "md53175bce1d3201d16594cebf9d7eb3f9d"
+"admin" "md5d033e22ae348aeb5660fc2140aec35850c4da997"
+"replicator" "md5fe12c5cbd88a2f29fac6a9b6d7b7d6e50c7c6ec4"

@@ -1,0 +1,101 @@
+#!/bin/bash
+
+# Create necessary directories
+mkdir -p $SNAP_DATA/postgresql
+mkdir -p $SNAP_DATA/patroni
+mkdir -p $SNAP_DATA/logs
+mkdir -p $SNAP_DATA/tls
+
+# Set up PostgreSQL data directory if it doesn't exist
+if [ ! -f "$SNAP_DATA/postgresql/PG_VERSION" ]; then
+    echo "Initializing PostgreSQL database..."
+    $SNAP/bin/initdb -D $SNAP_DATA/postgresql \
+        --auth-local=md5 \
+        --auth-host=md5 \
+        --username=postgres \
+        --pwfile=<(echo "postgres")
+fi
+
+# Copy default configuration files if they don't exist
+if [ ! -f "$SNAP_DATA/patroni.yml" ]; then
+    cp $SNAP/configs/patroni1.yml $SNAP_DATA/patroni.yml
+    
+    # Update paths in patroni config
+    sed -i "s|/var/lib/postgresql|$SNAP_DATA/postgresql|g" $SNAP_DATA/patroni.yml
+    sed -i "s|/usr/lib/postgresql/17/bin|$SNAP/bin|g" $SNAP_DATA/patroni.yml
+fi
+
+if [ ! -f "$SNAP_DATA/haproxy.cfg" ]; then
+    cp $SNAP/configs/haproxy.cfg $SNAP_DATA/haproxy.cfg
+fi
+
+if [ ! -f "$SNAP_DATA/pgbouncer.ini" ]; then
+    cp $SNAP/configs/pgbouncer.ini $SNAP_DATA/pgbouncer.ini
+    cp $SNAP/configs/userlist.txt $SNAP_DATA/userlist.txt
+    
+    # Update paths in pgbouncer config
+    sed -i "s|/etc/pgbouncer|$SNAP_DATA|g" $SNAP_DATA/pgbouncer.ini
+fi
+
+if [ ! -f "$SNAP_DATA/pgpool.conf" ]; then
+    cp $SNAP/configs/pgpool.conf $SNAP_DATA/pgpool.conf
+    
+    # Update paths in pgpool config
+    sed -i "s|/var/snap/percona-postgresql/current|$SNAP_DATA|g" $SNAP_DATA/pgpool.conf
+fi
+
+if [ ! -f "$SNAP_DATA/pgbackrest.conf" ]; then
+    cp $SNAP/configs/pgbackrest.conf $SNAP_DATA/pgbackrest.conf
+    
+    # Update paths in pgbackrest config
+    sed -i "s|/var/snap/percona-postgresql/current|$SNAP_DATA|g" $SNAP_DATA/pgbackrest.conf
+    
+    # Create backup repository directory
+    mkdir -p $SNAP_DATA/backup
+fi
+
+# Set up TLS certificates if they exist
+if [ -d "$SNAP/tls" ]; then
+    cp -r $SNAP/tls/* $SNAP_DATA/tls/
+    chmod 600 $SNAP_DATA/tls/server.key
+    chmod 644 $SNAP_DATA/tls/server.crt
+    chmod 644 $SNAP_DATA/tls/ca.crt
+fi
+
+# Set proper permissions
+chown -R root:root $SNAP_DATA
+find $SNAP_DATA -type d -exec chmod 755 {} \;
+find $SNAP_DATA -type f -exec chmod 644 {} \;
+chmod 700 $SNAP_DATA/postgresql
+chmod +x $SNAP_DATA/tls/server.key 2>/dev/null || true
+
+echo "Percona PostgreSQL installation completed successfully!"
+echo "Data directory: $SNAP_DATA"
+echo ""
+echo "Available commands:"
+echo "  Core PostgreSQL:"
+echo "    percona-postgresql.postgresql  - PostgreSQL server"
+echo "    percona-postgresql.psql        - PostgreSQL client"
+echo "    percona-postgresql.pg-dump     - Database backup"
+echo "    percona-postgresql.pg-restore  - Database restore"
+echo ""
+echo "  High Availability:"
+echo "    percona-postgresql.patroni     - Patroni cluster manager"
+echo "    percona-postgresql.patronictl  - Patroni control"
+echo "    percona-postgresql.haproxy     - HAProxy load balancer"
+echo ""
+echo "  Connection Pooling:"
+echo "    percona-postgresql.pgbouncer   - PgBouncer pooler"
+echo "    percona-postgresql.pgpool2     - pgpool-II middleware"
+echo ""
+echo "  Backup & Monitoring:"
+echo "    percona-postgresql.pgbackrest  - Enterprise backup"
+echo "    percona-postgresql.pgbadger    - Log analyzer"
+echo "    percona-postgresql.pg-gather   - Diagnostic collector"
+echo ""
+echo "  Administration:"
+echo "    percona-postgresql.percona-toolkit - Toolkit utilities"
+echo ""
+echo "Quick start:"
+echo "  sudo snap start percona-postgresql.postgresql"
+echo "  percona-postgresql.psql -U postgres"

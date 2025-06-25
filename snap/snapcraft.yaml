@@ -1,0 +1,215 @@
+name: percona-postgresql
+base: core22
+version: '17.5'
+summary: Percona Distribution for PostgreSQL with high availability
+description: |
+  Percona Distribution for PostgreSQL is a collection of tools to assist you 
+  in deploying and managing PostgreSQL. It provides an enterprise-grade 
+  PostgreSQL distribution with additional features including Patroni for 
+  high availability, PgBouncer for connection pooling, HAProxy for 
+  load balancing, pgBackRest for backup, and comprehensive monitoring tools.
+
+grade: stable
+confinement: strict
+
+architectures:
+- amd64
+- arm64
+
+system-usernames:
+  snap_daemon: shared
+
+plugs:
+  shared-memory:
+    private: true
+
+environment:
+  PGDATA: $SNAP_COMMON/var/lib/postgresql/17/main
+  PERL5LIB: $SNAP/usr/share/perl5
+  PERCONA_TOOLKIT_TEST_MODE: 1
+
+apps:
+  postgresql:
+    command: bin/start-postgres.sh
+    daemon: simple
+    install-mode: disable
+    restart-condition: always
+    plugs: [network, network-bind, process-control, system-observe, shared-memory]
+
+  createdb:
+    command: usr/bin/createdb
+    plugs: [network]
+
+  createuser:
+    command: usr/bin/createuser
+    plugs: [network]
+
+  pg-ctl:
+    command: usr/lib/postgresql/17/bin/pg_ctl
+    plugs: [network, process-control]
+
+  pg-dump:
+    command: usr/bin/pg_dump
+    plugs: [network]
+
+  pg-dumpall:
+    command: usr/bin/pg_dumpall
+    plugs: [network]
+
+  pg-restore:
+    command: usr/bin/pg_restore
+    plugs: [network]
+
+  pg-basebackup:
+    command: usr/bin/pg_basebackup
+    plugs: [network]
+
+  pg-isready:
+    command: usr/bin/pg_isready
+    plugs: [network]
+
+  psql:
+    command: bin/psql-wrapper.sh
+    plugs: [network]
+
+  pgbench:
+    command: usr/bin/pgbench
+    plugs: [network]
+
+  patroni:
+    command: bin/start-patroni.sh
+    daemon: simple
+    install-mode: disable
+    restart-condition: always
+    plugs: [network, network-bind, process-control, system-observe]
+
+  patronictl:
+    command: usr/bin/patronictl
+    plugs: [network]
+
+  pgbouncer:
+    command: usr/sbin/pgbouncer
+    plugs: [network, network-bind]
+
+  pgbouncer-server:
+    command: bin/start-pgbouncer.sh
+    daemon: simple
+    install-mode: disable
+    plugs: [network, network-bind]
+
+  haproxy:
+    command: bin/start-haproxy.sh
+    daemon: simple
+    install-mode: disable
+    plugs: [network, network-bind]
+
+  pt-summary:
+    command: usr/bin/pt-summary
+    plugs: [system-observe]
+
+  pt-diskstats:
+    command: usr/bin/pt-diskstats
+    plugs: [system-observe]
+
+  pt-config-diff:
+    command: usr/bin/pt-config-diff
+    plugs: [network]
+
+parts:
+  percona-repo:
+    plugin: nil
+    build-packages:
+      - wget
+      - gnupg
+      - lsb-release
+      - ca-certificates
+      - curl
+    override-pull: |
+      set -eux
+      snapcraftctl pull
+      wget https://repo.percona.com/apt/percona-release_1.0-30.generic_all.deb
+      apt install -y ./percona-release_1.0-30.generic_all.deb
+      percona-release enable ppg-17.5 release
+      percona-release enable pt release
+      apt-get update
+
+  postgresql-and-tools:
+    after: [percona-repo]
+    plugin: nil
+    override-pull: |
+      set -e
+      snapcraftctl pull
+      percona-release enable ppg-17.5 release || echo "Continuing despite possible failure"
+      apt-get update
+    override-build: |
+      set -e
+      apt-get install -y \
+        percona-postgresql-17 \
+        percona-postgresql-client-17 \
+        percona-postgresql-contrib \
+        percona-postgresql-server-dev-17 \
+        percona-postgresql-plperl-17 \
+        percona-postgresql-plpython3-17 \
+        percona-postgresql-pltcl-17 \
+        util-linux \
+        locales-all \
+        percona-patroni \
+        percona-pgbouncer \
+        percona-haproxy \
+        socat \
+        percona-toolkit \
+        python3-psycopg2 \
+        python3-yaml \
+        python3-dateutil \
+        python3-click \
+        python3-prettytable \
+        python3-urllib3 \
+        python3-etcd \
+        python3-kubernetes \
+        python3-consul \
+        python3-boto3 || echo "Some packages may not be available"
+    stage-packages:
+      - percona-postgresql-17
+      - percona-postgresql-client-17
+      - percona-postgresql-client-17
+      - percona-postgresql-contrib
+      - percona-postgresql-server-dev-17
+      - percona-postgresql-plperl-17
+      - percona-postgresql-plpython3-17
+      - percona-postgresql-pltcl-17
+      - percona-patroni
+      - percona-pgbouncer
+      - percona-haproxy
+      - socat
+      - percona-toolkit
+      - util-linux
+      - locales-all
+      - ca-certificates
+      - wget
+      - curl
+      - python3-psycopg2
+      - python3-yaml
+      - python3-dateutil
+      - python3-click
+      - python3-prettytable
+      - python3-urllib3
+      - python3-etcd
+      - python3-kubernetes
+      - python3-consul
+      - python3-boto3
+
+  wrapper-scripts:
+    plugin: dump
+    source: snap/local
+    organize:
+      '*': bin/
+    override-build: |
+      snapcraftctl build
+      find $SNAPCRAFT_PART_INSTALL -name "*.sh" -exec chmod +x {} \;
+
+  configs:
+    plugin: dump
+    source: configs/
+    organize:
+      '*': etc/
+

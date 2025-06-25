@@ -1,0 +1,189 @@
+version: '3.8'
+
+services:
+  # Override the default service to be node1
+  percona-postgresql:
+    container_name: patroni-node1
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      - PATRONI_CLUSTER_NAME=percona-cluster
+      - PATRONI_NODE_NAME=node1
+      - PATRONI_RESTAPI_LISTEN=patroni-node1
+      - PATRONI_POSTGRESQL_CONNECT_ADDRESS=patroni-node1
+      - ETCD_HOSTS=etcd1:2379,etcd2:2379,etcd3:2379
+    volumes:
+      - postgres_data_1:/var/snap/percona-postgresql/current
+      - ./configs/patroni1.yml:/snap/percona-postgresql/current/configs/patroni1.yml:ro
+    ports:
+      - "5432:5432"
+      - "8008:8008"
+
+  patroni-node2:
+    build: .
+    image: percona-postgresql:17.5
+    container_name: patroni-node2
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      - PATRONI_CLUSTER_NAME=percona-cluster
+      - PATRONI_NODE_NAME=node2
+      - PATRONI_RESTAPI_LISTEN=patroni-node2
+      - PATRONI_POSTGRESQL_CONNECT_ADDRESS=patroni-node2
+      - ETCD_HOSTS=etcd1:2379,etcd2:2379,etcd3:2379
+    ports:
+      - "5433:5432"
+      - "8009:8008"
+    volumes:
+      - postgres_data_2:/var/snap/percona-postgresql/current
+      - ./configs/patroni2.yml:/snap/percona-postgresql/current/configs/patroni2.yml:ro
+    depends_on:
+      - etcd1
+      - etcd2
+      - etcd3
+    networks:
+      - percona-net
+    restart: unless-stopped
+    command: ["patroni"]
+
+  patroni-node3:
+    build: .
+    image: percona-postgresql:17.5
+    container_name: patroni-node3
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      - PATRONI_CLUSTER_NAME=percona-cluster
+      - PATRONI_NODE_NAME=node3
+      - PATRONI_RESTAPI_LISTEN=patroni-node3
+      - PATRONI_POSTGRESQL_CONNECT_ADDRESS=patroni-node3
+      - ETCD_HOSTS=etcd1:2379,etcd2:2379,etcd3:2379
+    ports:
+      - "5434:5432"
+      - "8010:8008"
+    volumes:
+      - postgres_data_3:/var/snap/percona-postgresql/current
+      - ./configs/patroni3.yml:/snap/percona-postgresql/current/configs/patroni3.yml:ro
+    depends_on:
+      - etcd1
+      - etcd2
+      - etcd3
+    networks:
+      - percona-net
+    restart: unless-stopped
+    command: ["patroni"]
+
+  # HAProxy load balancer
+  haproxy:
+    build: .
+    image: percona-postgresql:17.5
+    container_name: haproxy
+    ports:
+      - "5000:5000"  # Primary connection
+      - "5001:5001"  # Replica connection
+      - "7000:7000"  # Stats page
+    volumes:
+      - ./configs/haproxy.cfg:/var/snap/percona-postgresql/current/haproxy.cfg:ro
+    depends_on:
+      - percona-postgresql
+      - patroni-node2
+      - patroni-node3
+    networks:
+      - percona-net
+    restart: unless-stopped
+    command: ["haproxy"]
+
+  # PgBouncer connection pooler
+  pgbouncer:
+    build: .
+    image: percona-postgresql:17.5
+    container_name: pgbouncer
+    ports:
+      - "6432:6432"
+    volumes:
+      - ./configs/pgbouncer.ini:/var/snap/percona-postgresql/current/pgbouncer.ini:ro
+      - ./configs/userlist.txt:/var/snap/percona-postgresql/current/userlist.txt:ro
+    depends_on:
+      - haproxy
+    networks:
+      - percona-net
+    restart: unless-stopped
+    command: ["pgbouncer"]
+
+  # etcd cluster for Patroni
+  etcd1:
+    image: quay.io/coreos/etcd:v3.5.10
+    container_name: etcd1
+    environment:
+      - ETCD_NAME=etcd1
+      - ETCD_DATA_DIR=/etcd-data
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd1:2379
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd1:2380
+      - ETCD_INITIAL_CLUSTER=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - ETCD_INITIAL_CLUSTER_TOKEN=etcd-cluster
+      - ETCD_INITIAL_CLUSTER_STATE=new
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+    volumes:
+      - etcd_data_1:/etcd-data
+    networks:
+      - percona-net
+    restart: unless-stopped
+
+  etcd2:
+    image: quay.io/coreos/etcd:v3.5.10
+    container_name: etcd2
+    environment:
+      - ETCD_NAME=etcd2
+      - ETCD_DATA_DIR=/etcd-data
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd2:2379
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd2:2380
+      - ETCD_INITIAL_CLUSTER=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - ETCD_INITIAL_CLUSTER_TOKEN=etcd-cluster
+      - ETCD_INITIAL_CLUSTER_STATE=new
+    ports:
+      - "2381:2379"
+      - "2382:2380"
+    volumes:
+      - etcd_data_2:/etcd-data
+    networks:
+      - percona-net
+    restart: unless-stopped
+
+  etcd3:
+    image: quay.io/coreos/etcd:v3.5.10
+    container_name: etcd3
+    environment:
+      - ETCD_NAME=etcd3
+      - ETCD_DATA_DIR=/etcd-data
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd3:2379
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd3:2380
+      - ETCD_INITIAL_CLUSTER=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - ETCD_INITIAL_CLUSTER_TOKEN=etcd-cluster
+      - ETCD_INITIAL_CLUSTER_STATE=new
+    ports:
+      - "2383:2379"
+      - "2384:2380"
+    volumes:
+      - etcd_data_3:/etcd-data
+    networks:
+      - percona-net
+    restart: unless-stopped
+
+volumes:
+  postgres_data_1:
+    driver: local
+  postgres_data_2:
+    driver: local
+  postgres_data_3:
+    driver: local
+  etcd_data_1:
+    driver: local
+  etcd_data_2:
+    driver: local
+  etcd_data_3:
+    driver: local

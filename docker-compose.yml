@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  percona-postgresql:
+    build: .
+    image: percona-postgresql:17.5
+    container_name: percona-postgresql
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      - PATRONI_CLUSTER_NAME=percona-cluster
+      - PATRONI_NODE_NAME=node1
+      - ETCD_HOSTS=etcd:2379
+    ports:
+      - "5432:5432"
+      - "8008:8008"
+      - "5000:5000"
+      - "5001:5001"
+      - "6432:6432"
+      - "7000:7000"
+    volumes:
+      - postgres_data:/var/snap/percona-postgresql/current
+      - ./configs:/snap/percona-postgresql/current/configs:ro
+    depends_on:
+      - etcd
+    networks:
+      - percona-net
+    restart: unless-stopped
+    command: ["patroni"]
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.10
+    container_name: etcd
+    environment:
+      - ETCD_NAME=etcd
+      - ETCD_DATA_DIR=/etcd-data
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd:2379
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd:2380
+      - ETCD_INITIAL_CLUSTER=etcd=http://etcd:2380
+      - ETCD_INITIAL_CLUSTER_TOKEN=etcd-cluster
+      - ETCD_INITIAL_CLUSTER_STATE=new
+      - ETCD_AUTO_COMPACTION_RETENTION=1
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+    volumes:
+      - etcd_data:/etcd-data
+    networks:
+      - percona-net
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  etcd_data:
+    driver: local
+
+networks:
+  percona-net:
+    driver: bridge

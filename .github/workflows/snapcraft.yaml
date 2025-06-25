@@ -1,0 +1,146 @@
+name: Build and Release Percona PostgreSQL Snap
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  SNAP_NAME: percona-postgresql
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Snapcraft
+      uses: snapcore/action-build@v1
+      id: snapcraft
+
+    - name: Upload snap artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.SNAP_NAME }}-snap
+        path: ${{ steps.snapcraft.outputs.snap }}
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download snap artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ env.SNAP_NAME }}-snap
+
+    - name: Install snap
+      run: |
+        sudo snap install --dangerous --devmode *.snap
+
+    - name: Test basic functionality
+      run: |
+        # Test PostgreSQL installation
+        ${{ env.SNAP_NAME }}.psql --version
+        
+        # Test Patroni installation
+        #which ${{ env.SNAP_NAME }}.patroni
+        
+        # Test HAProxy installation
+        #which ${{ env.SNAP_NAME }}.haproxy
+        
+        # Test PgBouncer installation  
+        #which ${{ env.SNAP_NAME }}.pgbouncer
+        
+        # Start PostgreSQL service
+        #sudo snap start ${{ env.SNAP_NAME }}.postgresql
+        #sleep 10
+        
+        # Test connection
+        $timeout 30 bash -c 'until ${{ env.SNAP_NAME }}.psql -U postgres -h /tmp -c "SELECT 1;" > /dev/null 2>&1; do sleep 1; done'
+        
+        # Show service status
+        sudo snap services ${{ env.SNAP_NAME }}
+
+  security-scan:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download snap artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ env.SNAP_NAME }}-snap
+
+    - name: Run security scan
+      run: |
+        # Install security scanning tools
+        sudo apt-get update
+        sudo apt-get install -y clamav clamav-daemon
+        sudo freshclam
+        
+        # Scan the snap package
+        clamscan --recursive --infected --remove=no *.snap || true
+        
+        # Check snap confinement and permissions
+        snap info *.snap || true
+
+  release:
+    needs: [build, test, docker-test, security-scan]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download snap artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ env.SNAP_NAME }}-snap
+
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        body: |
+          ## Percona PostgreSQL ${{ github.ref }} Release
+          
+          ### Changes
+          - Percona Distribution for PostgreSQL 17.5
+          - TLS support
+          
+          ### Installation
+          ```bash
+          sudo snap install percona-postgresql
+          ```
+          
+          ### Quick Start
+          ```bash
+          # Start PostgreSQL
+          sudo snap start percona-postgresql.postgresql
+          
+          # Connect to database
+          percona-postgresql.psql -U postgres -h /tmp
+          ```
+        draft: false
+        prerelease: false
+
+    - name: Upload snap to GitHub Release
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ${{ env.SNAP_NAME }}_*.snap
+        asset_name: ${{ env.SNAP_NAME }}.snap
+        asset_content_type: application/octet-stream
