@@ -337,7 +337,6 @@ sudo snap refresh percona-postgresql
 * **Documentation** : [Percona PostgreSQL Documentation](https://docs.percona.com/postgresql/)
 * **Community** : [Percona Community Forum](https://forums.percona.com/)
 * **Issues** : Submit issues in this repository
-* **Commercial Support** : [Percona Support Services](https://www.percona.com/services/support)
 
 ## License
 
