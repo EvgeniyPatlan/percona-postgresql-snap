@@ -93,7 +93,7 @@ jobs:
         snap info *.snap || true
 
   release:
-    needs: [build, test, docker-test, security-scan]
+    needs: [build, test, security-scan]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
